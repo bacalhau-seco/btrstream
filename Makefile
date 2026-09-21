@@ -1,7 +1,7 @@
 CC = clang
 TARGET = build/niggastream
 
-CFLAGS = -std=c99 -Werror -Iinclude -Wall -Wextra -O3
+CFLAGS = -std=c99 -Werror -Iinclude -lshout -Wall -Wextra -O3
 
 SRC = src/*.c
 
