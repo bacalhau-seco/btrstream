@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include <shout/shout.h>
-#include "../include/config.h"
+#include "config.h"
 
 int main()
 {
