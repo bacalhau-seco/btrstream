@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <shout/shout.h>
+#include "../include/config.h"
 
 int main()
 {
@@ -18,7 +19,7 @@ int main()
         return 1;
     }
 
-    if (shout_set_host(shout, "127.0.0.1") != SHOUTERR_SUCCESS) {
+    if (shout_set_host(shout, ip) != SHOUTERR_SUCCESS) {
         printf("Error setting hostname: %s\n", shout_get_error(shout));
         return 1;
     }
@@ -28,12 +29,12 @@ int main()
         return 1;
     }
 
-    if (shout_set_port(shout, 8000) != SHOUTERR_SUCCESS) {
+    if (shout_set_port(shout, port) != SHOUTERR_SUCCESS) {
         printf("Error setting port: %s\n", shout_get_error(shout));
         return 1;
     }
 
-    if (shout_set_password(shout, "hackme") != SHOUTERR_SUCCESS) {
+    if (shout_set_password(shout, password) != SHOUTERR_SUCCESS) {
         printf("Error setting password: %s\n", shout_get_error(shout));
         return 1;
     }
@@ -42,7 +43,7 @@ int main()
         return 1;
     }
 
-    if (shout_set_user(shout, "source") != SHOUTERR_SUCCESS) {
+    if (shout_set_user(shout, username) != SHOUTERR_SUCCESS) {
         printf("Error setting user: %s\n", shout_get_error(shout));
         return 1;
     }
