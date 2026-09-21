@@ -18,3 +18,9 @@ For the development of niggastream it will be used libshout to connect and strea
 
 ## Dependencies
 - libshout
+
+## How to use
+niggastream assumes you follow this:
+`/mnt/storage/radio/Music/Death/Human/04 - Secret Face.ogg`
+
+Meaning the artist name always comes after `Music`
