@@ -12,3 +12,9 @@ These are the defining features:
 - dont repeat the same song if it played X songs ago
 
 This will keep webradio fresh at the cost of nothing. Extremly ez to use, configure and manage. You're welcome!
+
+## Development description
+For the development of niggastream it will be used libshout to connect and stream the content to the icecast server.
+
+## Dependencies
+- libshout

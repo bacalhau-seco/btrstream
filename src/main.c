@@ -1,7 +1,3 @@
-/* example.c: Demonstration of the libshout API.
- * $Id$
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,4 +81,3 @@ int main()
 
     return 0;
 }
-
