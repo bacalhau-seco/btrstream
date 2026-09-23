@@ -3,9 +3,11 @@
 
 #include <shout/shout.h>
 #include "config.h"
+#include "playlist.h"
 
 int main()
 {
+    char line[4096];
     shout_t *shouts[sizeof(mounts) / sizeof(mounts[0])];
 
     shout_init();
@@ -58,7 +60,19 @@ int main()
 
         printf("Mounted %s\n", mounts[i]);
     }
+    for (size_t i = 0; i < sizeof(playlists) / sizeof(playlists[0]); i++) {
+        FILE *playlist;
 
+        if (!(playlist = playlist_open(playlists[i]))) {
+            printf("Could not open playlist: %s\n", playlists[i]);
+            return 1;
+        }
+
+        while (playlist_next(playlist, line, sizeof(line)))
+            printf("%s\n", line);
+
+        playlist_close(playlist);
+    }
     while (1)
         pause();
 
