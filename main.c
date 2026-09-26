@@ -1,14 +1,61 @@
 #include <stdio.h>
-#include <unistd.h>
+#include <pthread.h>
 
 #include <shout/shout.h>
 #include "config.h"
 #include "playlist.h"
 
+struct stream {
+    shout_t *shout;
+    const char *playlist_name;
+};
+
+void *stream_play(void *arg) // function used to play the stream
+{
+    struct stream *stream = arg;
+    char line[4096];
+    char buffer[8192];
+    FILE *playlist;
+
+    if (!(playlist = playlist_open(stream->playlist_name))) {
+        printf("Could not open playlist: %s\n", stream->playlist_name);
+        return NULL;
+    }
+
+    while (playlist_next(playlist, line, sizeof(line))) {
+        FILE *file;
+        size_t bytes;
+
+        if (!(file = fopen(line, "rb"))) {
+            printf("Could not open track: %s\n", line);
+            continue;
+        }
+
+        printf("Playing %s\n", line);
+
+        while ((bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+            if (shout_send(stream->shout, (unsigned char *)buffer, bytes) != SHOUTERR_SUCCESS) {
+                printf("Error sending %s: %s\n", line, shout_get_error(stream->shout));
+                fclose(file);
+                playlist_close(playlist);
+                return NULL;
+            }
+
+            shout_sync(stream->shout);
+        }
+
+        fclose(file);
+    }
+
+    playlist_close(playlist);
+    return NULL;
+}
+
 int main()
 {
-    char line[4096];
     shout_t *shouts[sizeof(mounts) / sizeof(mounts[0])];
+    pthread_t threads[sizeof(mounts) / sizeof(mounts[0])]; // declare thread array
+    struct stream streams[sizeof(mounts) / sizeof(mounts[0])]; 
 
     shout_init();
 
@@ -59,22 +106,25 @@ int main()
         }
 
         printf("Mounted %s\n", mounts[i]);
-    }
-    for (size_t i = 0; i < sizeof(playlists) / sizeof(playlists[0]); i++) {
-        FILE *playlist;
 
-        if (!(playlist = playlist_open(playlists[i]))) {
-            printf("Could not open playlist: %s\n", playlists[i]);
-            return 1;
+        streams[i].shout = shouts[i];
+        streams[i].playlist_name = playlists[i];
+
+        if (pthread_create(&threads[i], NULL, stream_play, &streams[i]) != 0) { // creates the thread for every stream and plays the stream
+            printf("Could not create thread\n");
+            return 1; // closes if the thread fails to create
         }
-
-        while (playlist_next(playlist, line, sizeof(line)))
-            printf("%s\n", line);
-
-        playlist_close(playlist);
     }
-    while (1)
-        pause();
+
+    for (size_t i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
+        pthread_join(threads[i], NULL);
+
+    for (size_t i = 0; i < sizeof(shouts) / sizeof(shouts[0]); i++) {
+        shout_close(shouts[i]);
+        shout_free(shouts[i]);
+    }
+
+    shout_shutdown();
 
     return 0;
 }
