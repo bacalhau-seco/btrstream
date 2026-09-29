@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <pthread.h>
+#include <stdlib.h>
 
 #include <shout/shout.h>
 #include "config.h"
@@ -10,23 +11,23 @@ struct stream {
     const char *playlist_name;
 };
 
-void *stream_play(void *arg) // function used to play the stream
+void *stream_play(void *arg)
 {
     struct stream *stream = arg;
     char line[4096];
     char buffer[8192];
-    FILE *playlist;
+    FILE *playlist = playlist_open(stream->playlist_name);
 
-    if (!(playlist = playlist_open(stream->playlist_name))) {
+    if (!playlist) {
         printf("Could not open playlist: %s\n", stream->playlist_name);
         return NULL;
     }
 
     while (playlist_next(playlist, line, sizeof(line))) {
-        FILE *file;
+        FILE *file = fopen(line, "rb");
         size_t bytes;
 
-        if (!(file = fopen(line, "rb"))) {
+        if (!file) {
             printf("Could not open track: %s\n", line);
             continue;
         }
@@ -51,12 +52,14 @@ void *stream_play(void *arg) // function used to play the stream
     return NULL;
 }
 
+
 int main()
 {
     shout_t *shouts[sizeof(mounts) / sizeof(mounts[0])];
     pthread_t threads[sizeof(mounts) / sizeof(mounts[0])]; // declare thread array
     struct stream streams[sizeof(mounts) / sizeof(mounts[0])]; 
 
+    srand(time(NULL));
     shout_init();
 
     for (size_t i = 0; i < sizeof(mounts) / sizeof(mounts[0]); i++) {
