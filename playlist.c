@@ -8,7 +8,7 @@ FILE *playlist_open(const char *path)
     return fopen(path, "r");
 }
 
-int playlist_next(FILE *playlist, char *line, size_t size)
+int playlist_next(FILE *playlist, char *line, size_t size) // shuffle needs to be implemented here!!!!
 {
     while (fgets(line, size, playlist)) {
         if (line[0] == '#' || line[0] == '\n')
