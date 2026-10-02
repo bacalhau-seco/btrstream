@@ -158,6 +158,7 @@ int main(void)
     sigemptyset(&action.sa_mask);
     sigaction(SIGINT, &action, NULL);
     sigaction(SIGTERM, &action, NULL);
+    signal(SIGPIPE, SIG_IGN);
 
     shout_init();
 
