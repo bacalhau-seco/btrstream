@@ -10,6 +10,7 @@ These are the defining features:
 - extremly easy to use configuration will be done at compile time
 - don't repeat artists in a row
 - dont repeat the same song if it played X songs ago
+- reconnects to icecast by itself if the connection drops
 
 This will keep webradio fresh at the cost of nothing. Extremly ez to use, configure and manage. You're welcome!
 
@@ -24,3 +25,10 @@ btrstream assumes you follow this:
 `/mnt/storage/radio/Music/Death/Human/04 - Secret Face.ogg`
 
 Meaning the artist name always comes after `Music`
+
+Edit `config.h` (ip, port, password, playlists and mounts), then:
+
+```
+make
+./btrstream
+```

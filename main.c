@@ -1,133 +1,192 @@
-#include <stdio.h>
+#define _POSIX_C_SOURCE 200809L
+
 #include <pthread.h>
+#include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
 
 #include <shout/shout.h>
 #include "config.h"
 #include "playlist.h"
 
+#define STREAM_COUNT (sizeof(mounts) / sizeof(mounts[0]))
+#define RETRY_SECONDS 5
+
 struct stream {
     shout_t *shout;
     const char *playlist_name;
+    unsigned int seed;
 };
 
-void *stream_play(void *arg)
+enum play_result {
+    PLAYED,
+    FILE_ERROR,
+    SEND_ERROR
+};
+
+static volatile sig_atomic_t running = 1;
+
+static void stop(int sig)
+{
+    (void)sig;
+    running = 0;
+}
+
+static void wait_seconds(int seconds)
+{
+    while (seconds-- > 0 && running)
+        sleep(1);
+}
+
+static enum play_result play_file(struct stream *stream, const char *path)
+{
+    unsigned char buffer[8192];
+    size_t bytes;
+    FILE *file = fopen(path, "rb");
+
+    if (!file) {
+        printf("Could not open track: %s\n", path);
+        return FILE_ERROR;
+    }
+
+    printf("[%s] Playing %s\n", stream->playlist_name, path);
+
+    while (running && (bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        if (shout_send(stream->shout, buffer, bytes) != SHOUTERR_SUCCESS) {
+            printf("[%s] Error sending: %s\n", stream->playlist_name, shout_get_error(stream->shout));
+            fclose(file);
+            return SEND_ERROR;
+        }
+
+        shout_sync(stream->shout);
+    }
+
+    fclose(file);
+    return PLAYED;
+}
+
+static void *stream_play(void *arg)
 {
     struct stream *stream = arg;
-    char line[4096];
-    char buffer[8192];
-    FILE *playlist = playlist_open(stream->playlist_name);
+    struct playlist playlist;
+    char track[4096];
+    int connected = 0;
 
-    if (!playlist) {
+    if (!playlist_open(&playlist, stream->playlist_name, stream->seed)) {
         printf("Could not open playlist: %s\n", stream->playlist_name);
         return NULL;
     }
 
-    while (playlist_next(playlist, line, sizeof(line))) {
-        FILE *file = fopen(line, "rb");
-        size_t bytes;
+    while (running) {
+        if (!connected) {
+            if (shout_open(stream->shout) != SHOUTERR_SUCCESS) {
+                printf("[%s] Could not connect: %s\n", stream->playlist_name, shout_get_error(stream->shout));
+                wait_seconds(RETRY_SECONDS);
+                continue;
+            }
 
-        if (!file) {
-            printf("Could not open track: %s\n", line);
+            connected = 1;
+            printf("[%s] Connected\n", stream->playlist_name);
+        }
+
+        if (!playlist_next(&playlist, track, sizeof(track))) {
+            printf("[%s] Playlist is empty or unreadable\n", stream->playlist_name);
+            wait_seconds(RETRY_SECONDS);
             continue;
         }
 
-        printf("Playing %s\n", line);
-
-        while ((bytes = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-            if (shout_send(stream->shout, (unsigned char *)buffer, bytes) != SHOUTERR_SUCCESS) {
-                printf("Error sending %s: %s\n", line, shout_get_error(stream->shout));
-                fclose(file);
-                playlist_close(playlist);
-                return NULL;
-            }
-
-            shout_sync(stream->shout);
+        switch (play_file(stream, track)) {
+        case FILE_ERROR:
+            wait_seconds(1);
+            break;
+        case SEND_ERROR:
+            shout_close(stream->shout);
+            connected = 0;
+            wait_seconds(RETRY_SECONDS);
+            break;
+        case PLAYED:
+            break;
         }
-
-        fclose(file);
     }
 
-    playlist_close(playlist);
+    if (connected)
+        shout_close(stream->shout);
+
+    playlist_close(&playlist);
     return NULL;
 }
 
-
-int main()
+static int stream_setup(struct stream *stream, size_t i)
 {
-    shout_t *shouts[sizeof(mounts) / sizeof(mounts[0])];
-    pthread_t threads[sizeof(mounts) / sizeof(mounts[0])]; // declare thread array
-    struct stream streams[sizeof(mounts) / sizeof(mounts[0])]; 
+    shout_t *shout = shout_new();
 
-    srand(time(NULL));
+    if (!shout) {
+        printf("Could not allocate shout_t\n");
+        return 0;
+    }
+
+    if (shout_set_host(shout, ip) != SHOUTERR_SUCCESS ||
+        shout_set_port(shout, port) != SHOUTERR_SUCCESS ||
+        shout_set_user(shout, username) != SHOUTERR_SUCCESS ||
+        shout_set_password(shout, password) != SHOUTERR_SUCCESS ||
+        shout_set_mount(shout, mounts[i]) != SHOUTERR_SUCCESS ||
+        shout_set_protocol(shout, SHOUT_PROTOCOL_HTTP) != SHOUTERR_SUCCESS ||
+        shout_set_meta(shout, SHOUT_META_NAME, playlists[i]) != SHOUTERR_SUCCESS ||
+        shout_set_content_format(shout, SHOUT_FORMAT_OGG, SHOUT_USAGE_UNKNOWN, NULL) != SHOUTERR_SUCCESS) {
+        printf("Error setting up %s: %s\n", mounts[i], shout_get_error(shout));
+        shout_free(shout);
+        return 0;
+    }
+
+    stream->shout = shout;
+    stream->playlist_name = playlists[i];
+    stream->seed = (unsigned int)time(NULL) + (unsigned int)i;
+
+    return 1;
+}
+
+int main(void)
+{
+    struct stream streams[STREAM_COUNT] = {0};
+    pthread_t threads[STREAM_COUNT];
+    struct sigaction action = {.sa_handler = stop};
+    size_t started = 0;
+    int status = 0;
+
+    sigemptyset(&action.sa_mask);
+    sigaction(SIGINT, &action, NULL);
+    sigaction(SIGTERM, &action, NULL);
+
     shout_init();
 
-    for (size_t i = 0; i < sizeof(mounts) / sizeof(mounts[0]); i++) {
-        if (!(shouts[i] = shout_new())) {
-            printf("Could not allocate shout_t\n");
-            return 1;
-        }
-
-        if (shout_set_host(shouts[i], ip) != SHOUTERR_SUCCESS) {
-            printf("Error setting hostname: %s\n", shout_get_error(shouts[i]));
-            return 1;
-        }
-
-        if (shout_set_protocol(shouts[i], SHOUT_PROTOCOL_HTTP) != SHOUTERR_SUCCESS) {
-            printf("Error setting protocol: %s\n", shout_get_error(shouts[i]));
-            return 1;
-        }
-
-        if (shout_set_port(shouts[i], port) != SHOUTERR_SUCCESS) {
-            printf("Error setting port: %s\n", shout_get_error(shouts[i]));
-            return 1;
-        }
-
-        if (shout_set_password(shouts[i], password) != SHOUTERR_SUCCESS) {
-            printf("Error setting password: %s\n", shout_get_error(shouts[i]));
-            return 1;
-        }
-
-        if (shout_set_mount(shouts[i], mounts[i]) != SHOUTERR_SUCCESS) {
-            printf("Error setting mount: %s\n", shout_get_error(shouts[i]));
-            return 1;
-        }
-
-        if (shout_set_user(shouts[i], username) != SHOUTERR_SUCCESS) {
-            printf("Error setting user: %s\n", shout_get_error(shouts[i]));
-            return 1;
-        }
-
-        if (shout_set_content_format(shouts[i], SHOUT_FORMAT_OGG, SHOUT_USAGE_UNKNOWN, NULL) != SHOUTERR_SUCCESS) {
-            printf("Error setting format: %s\n", shout_get_error(shouts[i]));
-            return 1;
-        }
-
-        if (shout_open(shouts[i]) != SHOUTERR_SUCCESS) {
-            printf("Error connecting to %s: %s\n", mounts[i], shout_get_error(shouts[i]));
-            return 1;
-        }
-
-        printf("Mounted %s\n", mounts[i]);
-
-        streams[i].shout = shouts[i];
-        streams[i].playlist_name = playlists[i];
-
-        if (pthread_create(&threads[i], NULL, stream_play, &streams[i]) != 0) { // creates the thread for every stream and plays the stream
-            printf("Could not create thread\n");
-            return 1; // closes if the thread fails to create
+    for (size_t i = 0; i < STREAM_COUNT; i++) {
+        if (!stream_setup(&streams[i], i)) {
+            status = 1;
+            goto cleanup;
         }
     }
 
-    for (size_t i = 0; i < sizeof(threads) / sizeof(threads[0]); i++)
+    for (; started < STREAM_COUNT; started++) {
+        if (pthread_create(&threads[started], NULL, stream_play, &streams[started]) != 0) {
+            printf("Could not create thread\n");
+            running = 0;
+            status = 1;
+            break;
+        }
+    }
+
+    for (size_t i = 0; i < started; i++)
         pthread_join(threads[i], NULL);
 
-    for (size_t i = 0; i < sizeof(shouts) / sizeof(shouts[0]); i++) {
-        shout_close(shouts[i]);
-        shout_free(shouts[i]);
+cleanup:
+    for (size_t i = 0; i < STREAM_COUNT; i++) {
+        if (streams[i].shout)
+            shout_free(streams[i].shout);
     }
 
     shout_shutdown();
 
-    return 0;
+    return status;
 }
